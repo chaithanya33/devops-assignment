@@ -1,59 +1,86 @@
-provider "aws" {
-  region = "ap-south-1"
-}
+name: DevOps Deployment (OIDC)
 
-##################################################
-# Security Group
-##################################################
-resource "aws_security_group" "devops_sg" {
-  name        = "devops-sg"
-  description = "Allow SSH and App traffic"
+on:
+  workflow_dispatch:
 
-  ingress {
-    description = "SSH"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+permissions:
+  id-token: write
+  contents: read
 
-  ingress {
-    description = "App Port"
-    from_port   = 8000
-    to_port     = 8000
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
 
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
+    steps:
+      ##################################################
+      # Checkout Repo
+      ##################################################
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-##################################################
-# EC2 Instance
-##################################################
-resource "aws_instance" "devops_ec2" {
-  ami           = "ami-0f58b397bc5c1f2e8" # Amazon Linux 2 (ap-south-1)
-  instance_type = "t2.micro"
-  key_name      = aws_key_pair.mykp.key_name
+      ##################################################
+      # AWS Login (OIDC)
+      ##################################################
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-  vpc_security_group_ids = [aws_security_group.devops_sg.id]
+      - name: Verify AWS Identity
+        run: aws sts get-caller-identity
 
-  tags = {
-    Name = "DevOps-EC2"
-  }
-}
+      ##################################################
+      # Build & Push Docker Image
+      ##################################################
+      - name: Login to DockerHub
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-  user_data = <<-EOF
-              #!/bin/bash
-              yum update -y
-              yum install docker -y
-              service docker start
-              usermod -aG docker ec2-user
-              EOF
-}
+      - name: Build Docker Image
+        run: docker build -t ${{ secrets.DOCKER_USERNAME }}/devops-api:latest -f backend/Dockerfile .
 
+      - name: Push Docker Image
+        run: docker push ${{ secrets.DOCKER_USERNAME }}/devops-api:latest
+
+      ##################################################
+      # Terraform Deploy EC2
+      ##################################################
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform Apply
+        working-directory: terraform
+        run: terraform apply -auto-approve
+
+      ##################################################
+      # Get EC2 Public IP
+      ##################################################
+      - name: Get EC2 Public IP
+        run: |
+          echo "EC2_IP=$(terraform -chdir=terraform output -raw instance_public_ip)" >> $GITHUB_ENV
+
+      ##################################################
+      # Setup SSH Key
+      ##################################################
+      - name: Setup SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_PRIVATE_KEY }}" > ~/.ssh/key.pem
+          chmod 600 ~/.ssh/key.pem
+
+      ##################################################
+      # Deploy to EC2
+      ##################################################
+      - name: Deploy Docker Container on EC2
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/key.pem ec2-user@$EC2_IP << 'EOF'
+            docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
+            docker pull ${{ secrets.DOCKER_USERNAME }}/devops-api:latest
+            docker stop devops-api || true
+            docker rm devops-api || true
+            docker compose up
+          EOF
