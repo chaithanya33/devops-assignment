@@ -47,4 +47,4 @@ Design and implement a workflow to:
   - simple architecture diagram to showcase cloud resources.
   - single-page frontend in `frontend/index.html` that:
     - calls the `POST /notify/` API to trigger a background task.
-    - polls the `GET /task_status/{task_id}` API to show live task status and result.
+    - polls the `GET /task_status/{task_id}` API to show live task status and result.# devops-assignment
