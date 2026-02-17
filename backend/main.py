@@ -1,3 +1,10 @@
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+REDIS_URL = os.getenv("REDIS_URL")
+
 from fastapi import FastAPI
 from celery.result import AsyncResult
 from worker import write_log_celery

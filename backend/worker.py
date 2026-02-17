@@ -1,11 +1,22 @@
 from celery import Celery
 import time
+import os
+from dotenv import load_dotenv
 
-# Configure Celery to use Redis as the message broker
+# ✅ Load environment variables from .env
+load_dotenv()
+
+# ✅ Get Redis URL from environment
+REDIS_URL = os.getenv("REDIS_URL")
+
+# Optional debug (you can remove later)
+print("Using REDIS_URL:", REDIS_URL)
+
+# ✅ Configure Celery using env variable (NO hardcoding)
 celery = Celery(
-    "worker",  # This is the name of your Celery application
-    broker="redis://localhost:6379/0",  # This is the Redis connection string
-    backend="redis://localhost:6379/0",  # for storing task results
+    "worker",
+    broker=REDIS_URL,
+    backend=REDIS_URL,
 )
 
 
@@ -15,4 +26,3 @@ def write_log_celery(message: str):
     with open("log_celery.txt", "a") as f:
         f.write(f"{message}\n")
     return f"Task completed: {message}"
-

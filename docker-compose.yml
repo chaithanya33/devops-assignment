@@ -1,0 +1,40 @@
+version: "3.9"
+
+services:
+
+  redis:
+    image: redis:7
+    container_name: redis-devops
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: fastapi-devops
+    env_file:
+      - backend/.env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    working_dir: /app/backend
+    volumes:
+      - ./backend:/app/backend
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: celery-worker-devops
+    env_file:
+      - backend/.env
+    depends_on:
+      - redis
+    command: python -m celery -A worker worker --loglevel=info
+    working_dir: /app/backend
+    volumes:
+      - ./backend:/app/backend
+
