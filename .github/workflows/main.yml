@@ -57,30 +57,30 @@ jobs:
         run: terraform apply -auto-approve
 
       ##################################################
-      # Get EC2 Public IP
+      # Deploy Docker Containers on EC2
       ##################################################
-      - name: Get EC2 Public IP
+      - name: Deploy Docker Containers on EC2
         run: |
-          echo "EC2_IP=$(terraform -chdir=terraform output -raw instance_public_ip)" >> $GITHUB_ENV
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/key.pem ec2-user@$EC2_IP << EOF
 
-      ##################################################
-      # Setup SSH Key
-      ##################################################
-      - name: Setup SSH Key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_PRIVATE_KEY }}" > ~/.ssh/key.pem
-          chmod 600 ~/.ssh/key.pem
+            # Install docker compose (if not installed)
+            sudo curl -L https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose
+            sudo chmod +x /usr/local/bin/docker-compose
 
-      ##################################################
-      # Deploy to EC2
-      ##################################################
-      - name: Deploy Docker Container on EC2
-        run: |
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/key.pem ec2-user@$EC2_IP << 'EOF'
+            # Clone repo if not exists
+            if [ ! -d "devops-assignment" ]; then
+              git clone https://github.com/${{ github.repository }}.git
+            fi
+
+            cd devops-assignment
+
             docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
+
+            # Pull latest image
             docker pull ${{ secrets.DOCKER_USERNAME }}/devops-api:latest
-            docker stop devops-api || true
-            docker rm devops-api || true
-            docker compose up
+
+            # Start full stack
+            docker compose down || true
+            docker compose up -d
+
           EOF
