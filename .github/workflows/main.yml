@@ -1,86 +1,39 @@
-name: DevOps Deployment (OIDC)
+- name: Terraform Apply
+  working-directory: terraform
+  run: terraform apply -auto-approve
+  env:
+    TF_VAR_public_key: ${{ secrets.EC2_PUBLIC_KEY }}
 
-on:
-  workflow_dispatch:
+- name: Get EC2 Public IP
+  working-directory: terraform
+  run: echo "EC2_IP=$(terraform output -raw ec2_public_ip)" >> $GITHUB_ENV
 
-permissions:
-  id-token: write
-  contents: read
+- name: Setup SSH Key
+  run: |
+    mkdir -p ~/.ssh
+    echo "${{ secrets.EC2_PRIVATE_KEY }}" > ~/.ssh/key.pem
+    chmod 600 ~/.ssh/key.pem
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
+- name: Deploy Docker Containers on EC2
+  run: |
+    ssh -o StrictHostKeyChecking=no -i ~/.ssh/key.pem ec2-user@$EC2_IP << EOF
+      sudo yum update -y
+      sudo amazon-linux-extras install docker -y
+      sudo service docker start
+      sudo usermod -aG docker ec2-user
 
-    steps:
-      ##################################################
-      # Checkout Repo
-      ##################################################
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      sudo curl -L https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-x86_64 \
+        -o /usr/local/bin/docker-compose
+      sudo chmod +x /usr/local/bin/docker-compose
 
-      ##################################################
-      # AWS Login (OIDC)
-      ##################################################
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+      docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Verify AWS Identity
-        run: aws sts get-caller-identity
+      if [ ! -d "devops-assignment" ]; then
+        git clone https://github.com/${{ github.repository }}.git
+      fi
 
-      ##################################################
-      # Build & Push Docker Image
-      ##################################################
-      - name: Login to DockerHub
-        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
-
-      - name: Build Docker Image
-        run: docker build -t ${{ secrets.DOCKER_USERNAME }}/devops-api:latest -f backend/Dockerfile .
-
-      - name: Push Docker Image
-        run: docker push ${{ secrets.DOCKER_USERNAME }}/devops-api:latest
-
-      ##################################################
-      # Terraform Deploy EC2
-      ##################################################
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-
-      - name: Terraform Init
-        working-directory: terraform
-        run: terraform init
-
-      - name: Terraform Apply
-        working-directory: terraform
-        run: terraform apply -auto-approve
-
-      ##################################################
-      # Deploy Docker Containers on EC2
-      ##################################################
-      - name: Deploy Docker Containers on EC2
-        run: |
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/key.pem ec2-user@$EC2_IP << EOF
-
-            # Install docker compose (if not installed)
-            sudo curl -L https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose
-            sudo chmod +x /usr/local/bin/docker-compose
-
-            # Clone repo if not exists
-            if [ ! -d "devops-assignment" ]; then
-              git clone https://github.com/${{ github.repository }}.git
-            fi
-
-            cd devops-assignment
-
-            docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
-
-            # Pull latest image
-            docker pull ${{ secrets.DOCKER_USERNAME }}/devops-api:latest
-
-            # Start full stack
-            docker compose down || true
-            docker compose up -d
-
-          EOF
+      cd devops-assignment
+      docker pull ${{ secrets.DOCKER_USERNAME }}/devops-api:latest
+      docker compose down || true
+      docker compose up -d
+    EOF
