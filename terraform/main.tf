@@ -13,9 +13,7 @@ data "aws_ami" "amazon_linux" {
 }
 
 resource "aws_security_group" "devops_sg" {
-  ...
 }
-
 resource "aws_instance" "devops_ec2" {
   ami           = data.aws_ami.amazon_linux.id
   instance_type = "t2.micro"
