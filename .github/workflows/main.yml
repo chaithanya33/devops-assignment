@@ -1,86 +1,98 @@
-name: DevOps Deployment (OIDC)
+name: DevOps Deployment (OIDC + Terraform + EC2)
 
 on:
-  workflow_dispatch:
+workflow_dispatch:
 
 permissions:
-  id-token: write
-  contents: read
+id-token: write
+contents: read
+
+env:
+IMAGE_NAME: ${{ secrets.DOCKER_USERNAME }}/devops-api:latest
 
 jobs:
-  deploy:
-    runs-on: ubuntu-latest
+deploy:
+runs-on: ubuntu-latest
 
-    steps:
-      ##################################################
-      # Checkout Repo
-      ##################################################
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+```
+steps:
 
-      ##################################################
-      # AWS Login (OIDC)
-      ##################################################
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+##################################################
+# Checkout Code
+##################################################
+- name: Checkout Repository
+  uses: actions/checkout@v4
 
-      - name: Verify AWS Identity
-        run: aws sts get-caller-identity
+##################################################
+# Configure AWS (OIDC)
+##################################################
+- name: Configure AWS credentials
+  uses: aws-actions/configure-aws-credentials@v4
+  with:
+    role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+    aws-region: ${{ secrets.AWS_REGION }}
 
-      ##################################################
-      # Build & Push Docker Image
-      ##################################################
-      - name: Login to DockerHub
-        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+- name: Verify AWS Login
+  run: aws sts get-caller-identity
 
-      - name: Build Docker Image
-        run: docker build -t ${{ secrets.DOCKER_USERNAME }}/devops-api:latest -f backend/Dockerfile .
+##################################################
+# Docker Build & Push
+##################################################
+- name: DockerHub Login
+  run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-      - name: Push Docker Image
-        run: docker push ${{ secrets.DOCKER_USERNAME }}/devops-api:latest
+- name: Build Docker Image
+  run: docker build -t $IMAGE_NAME -f backend/Dockerfile .
 
-      ##################################################
-      # Terraform Deploy EC2
-      ##################################################
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+- name: Push Docker Image
+  run: docker push $IMAGE_NAME
 
-      - name: Terraform Init
-        working-directory: terraform
-        run: terraform init
+##################################################
+# Terraform Deploy EC2
+##################################################
+- name: Setup Terraform
+  uses: hashicorp/setup-terraform@v3
 
-      - name: Terraform Apply
-        working-directory: terraform
-        run: terraform apply -auto-approve
+- name: Terraform Init
+  working-directory: terraform
+  run: terraform init
 
-      ##################################################
-      # Deploy Docker Containers on EC2
-      ##################################################
-      - name: Deploy Docker Containers on EC2
-        run: |
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/key.pem ec2-user@$EC2_IP << EOF
+- name: Terraform Apply
+  id: terraform
+  working-directory: terraform
+  run: |
+    terraform apply -auto-approve
+    echo "EC2_IP=$(terraform output -raw ec2_public_ip)" >> $GITHUB_ENV
 
-            # Install docker compose (if not installed)
-            sudo curl -L https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose
-            sudo chmod +x /usr/local/bin/docker-compose
+##################################################
+# Setup SSH Key
+##################################################
+- name: Setup SSH Key
+  run: |
+    mkdir -p ~/.ssh
+    echo "${{ secrets.EC2_PRIVATE_KEY }}" > ~/.ssh/key.pem
+    chmod 600 ~/.ssh/key.pem
 
-            # Clone repo if not exists
-            if [ ! -d "devops-assignment" ]; then
-              git clone https://github.com/${{ github.repository }}.git
-            fi
+##################################################
+# Deploy Containers on EC2
+##################################################
+- name: Deploy on EC2
+  run: |
+    ssh -o StrictHostKeyChecking=no -i ~/.ssh/key.pem ec2-user@$EC2_IP << EOF
 
-            cd devops-assignment
+      if [ ! -d "devops-assignment" ]; then
+        git clone https://github.com/${{ github.repository }}.git
+      fi
 
-            docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
+      cd devops-assignment
 
-            # Pull latest image
-            docker pull ${{ secrets.DOCKER_USERNAME }}/devops-api:latest
+      docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
 
-            # Start full stack
-            docker compose down || true
-            docker compose up -d
+      docker pull $IMAGE_NAME
 
-          EOF
+      docker compose down || true
+      docker compose up -d
+
+    EOF
+```
+
