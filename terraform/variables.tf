@@ -1,4 +1,4 @@
-variable "public_key" {
-  description = "EC2 Public SSH Key"
+variable "aws_region" {
+  description = "AWS region for deployment"
   type        = string
 }
