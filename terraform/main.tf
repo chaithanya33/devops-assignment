@@ -16,15 +16,6 @@ data "aws_ami" "amazon_linux" {
 }
 
 #############################
-# Key Pair
-#############################
-resource "aws_key_pair" "github_key" {
-  key_name   = "github-ec2-key"
-  public_key = var.public_key
-}
-
-
-#############################
 # Security Group
 #############################
 resource "aws_security_group" "devops_sg" {
