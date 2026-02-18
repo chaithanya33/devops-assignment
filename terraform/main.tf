@@ -20,8 +20,9 @@ data "aws_ami" "amazon_linux" {
 #############################
 resource "aws_key_pair" "github_key" {
   key_name   = "github-ec2-key"
-  public_key = file(var.public_key_path)
+  public_key = var.public_key
 }
+
 
 #############################
 # Security Group
