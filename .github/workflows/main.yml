@@ -12,9 +12,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      ##################################################
+      # Checkout Repo
+      ##################################################
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      ##################################################
+      # AWS Login (OIDC)
+      ##################################################
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -24,6 +30,9 @@ jobs:
       - name: Verify AWS Identity
         run: aws sts get-caller-identity
 
+      ##################################################
+      # Build & Push Docker Image
+      ##################################################
       - name: Login to DockerHub
         run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
@@ -33,6 +42,9 @@ jobs:
       - name: Push Docker Image
         run: docker push ${{ secrets.DOCKER_USERNAME }}/devops-api:latest
 
+      ##################################################
+      # Terraform Deploy EC2
+      ##################################################
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
@@ -43,3 +55,32 @@ jobs:
       - name: Terraform Apply
         working-directory: terraform
         run: terraform apply -auto-approve
+
+      ##################################################
+      # Deploy Docker Containers on EC2
+      ##################################################
+      - name: Deploy Docker Containers on EC2
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/key.pem ec2-user@$EC2_IP << EOF
+
+            # Install docker compose (if not installed)
+            sudo curl -L https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose
+            sudo chmod +x /usr/local/bin/docker-compose
+
+            # Clone repo if not exists
+            if [ ! -d "devops-assignment" ]; then
+              git clone https://github.com/${{ github.repository }}.git
+            fi
+
+            cd devops-assignment
+
+            docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
+
+            # Pull latest image
+            docker pull ${{ secrets.DOCKER_USERNAME }}/devops-api:latest
+
+            # Start full stack
+            docker compose down || true
+            docker compose up -d
+
+          EOF

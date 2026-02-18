@@ -1,24 +1,86 @@
-provider "aws" {
-  region = "ap-south-1"
-}
+name: DevOps Deployment (OIDC)
 
-resource "aws_instance" "devops_app" {
-  ami           = "ami-019715e0d74f695be"
-  instance_type = "t3.small"
+on:
+  workflow_dispatch:
 
-  # ✅ Attach keypair from keypair.tf
-  key_name = aws_key_pair.mykp.key_name
+permissions:
+  id-token: write
+  contents: read
 
-  tags = {
-    Name = "devops-assignment-instance"
-  }
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
 
-  user_data = <<-EOF
-              #!/bin/bash
-              yum update -y
-              yum install docker -y
-              service docker start
-              usermod -aG docker ec2-user
-              EOF
-}
+    steps:
+      ##################################################
+      # Checkout Repo
+      ##################################################
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
+      ##################################################
+      # AWS Login (OIDC)
+      ##################################################
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Verify AWS Identity
+        run: aws sts get-caller-identity
+
+      ##################################################
+      # Build & Push Docker Image
+      ##################################################
+      - name: Login to DockerHub
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+      - name: Build Docker Image
+        run: docker build -t ${{ secrets.DOCKER_USERNAME }}/devops-api:latest -f backend/Dockerfile .
+
+      - name: Push Docker Image
+        run: docker push ${{ secrets.DOCKER_USERNAME }}/devops-api:latest
+
+      ##################################################
+      # Terraform Deploy EC2
+      ##################################################
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform Apply
+        working-directory: terraform
+        run: terraform apply -auto-approve
+
+      ##################################################
+      # Get EC2 Public IP
+      ##################################################
+      - name: Get EC2 Public IP
+        run: |
+          echo "EC2_IP=$(terraform -chdir=terraform output -raw instance_public_ip)" >> $GITHUB_ENV
+
+      ##################################################
+      # Setup SSH Key
+      ##################################################
+      - name: Setup SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_PRIVATE_KEY }}" > ~/.ssh/key.pem
+          chmod 600 ~/.ssh/key.pem
+
+      ##################################################
+      # Deploy to EC2
+      ##################################################
+      - name: Deploy Docker Container on EC2
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/key.pem ec2-user@$EC2_IP << 'EOF'
+            docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
+            docker pull ${{ secrets.DOCKER_USERNAME }}/devops-api:latest
+            docker stop devops-api || true
+            docker rm devops-api || true
+            docker compose up
+          EOF
