@@ -60,7 +60,8 @@ jobs:
         working-directory: terraform
         run: |
           terraform apply -auto-approve \
-            -var="public_key=${{ secrets.EC2_PUBLIC_KEY }}"
+            -var="public_key=${{ secrets.EC2_PUBLIC_KEY }}" \
+            -var="aws_region=${{ secrets.AWS_REGION }}"
           echo "EC2_IP=$(terraform output -raw ec2_public_ip)" >> $GITHUB_ENV
 
       ##################################################
