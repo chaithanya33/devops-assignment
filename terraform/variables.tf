@@ -1,4 +1,7 @@
 variable "aws_region" {
-  description = "AWS region for deployment"
-  type        = string
+  type = string
+}
+
+variable "public_key" {
+  type = string
 }
