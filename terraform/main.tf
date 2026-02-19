@@ -16,7 +16,7 @@ resource "aws_security_group" "devops_sg" {
 }
 resource "aws_instance" "devops_ec2" {
   ami           = data.aws_ami.amazon_linux.id
-  instance_type = "t2.micro"
+  instance_type = "t3.micro"
 
   key_name = aws_key_pair.github_key.key_name
   vpc_security_group_ids = [aws_security_group.devops_sg.id]
