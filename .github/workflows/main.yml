@@ -76,15 +76,22 @@ jobs:
       ##################################################
       # Deploy Containers on EC2
       ##################################################
-      - name: Deploy on EC2
+      - name: Deploy to EC2
         run: |
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/key.pem ec2-user@$EC2_IP << EOF
-            if [ ! -d "devops-assignment" ]; then
-              git clone https://github.com/${{ github.repository }}.git
-            fi
-            cd devops-assignment
-            docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
-            docker pull $IMAGE_NAME
-            docker compose down || true
-            docker compose up -d
+          set -e
+
+          echo "CONNECTED TO EC2: \$(hostname)"
+
+          if [ ! -d "devops-assignment" ]; then
+            git clone https://github.com/${{ github.repository }}.git
+          fi
+
+          cd devops-assignment
+
+          docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
+          docker pull $IMAGE_NAME
+
+          docker compose down || true
+          docker compose up -d
           EOF
