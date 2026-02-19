@@ -22,7 +22,7 @@ data "aws_ami" "amazon_linux" {
 # Security Group (SSH + Outbound)
 ####################################
 resource "aws_security_group" "devops_sg" {
-  name        = "devops-sg"
+  name        = "devops-sg-1"
   description = "Allow SSH access and outbound traffic"
 
   # 🔹 INBOUND: SSH (22)
